@@ -3,7 +3,7 @@
 #Warn
 ;@Ahk2Exe-SetName SymbolKey
 ;@Ahk2Exe-SetDescription Korean name to math symbol converter
-;@Ahk2Exe-SetVersion 0.2.0
+;@Ahk2Exe-SetVersion 0.3.0
 ;@Ahk2Exe-SetCopyright Pimpypumpkin
 ; ============================================================
 ;  SymbolKey - 한글 이름을 수학/그리스 기호로 바꿔 주는 전역 입력기
@@ -45,7 +45,7 @@ LoadSymbols() {
         MsgBox("변환표 파일이 없습니다:`n" SymbolsFile, "SymbolKey", "Iconx")
         ExitApp
     }
-    m := Map()
+    m := Map()   ; name → {symbol, ambiguous}
     for line in StrSplit(FileRead(SymbolsFile, "UTF-8"), "`n", "`r") {
         line := Trim(line)
         if (line = "" || SubStr(line, 1, 1) = ";" || SubStr(line, 1, 1) = "#")
@@ -54,8 +54,11 @@ LoadSymbols() {
         if !pos
             continue
         name := Trim(SubStr(line, 1, pos - 1)), symbol := Trim(SubStr(line, pos + 1))
+        ambiguous := SubStr(name, 1, 1) = "?"      ; "?각=∠" : 일상어와 겹치는 이름 → 수식 문맥에서만 변환
+        if ambiguous
+            name := Trim(SubStr(name, 2))
         if (name != "" && symbol != "")
-            m[name] := symbol
+            m[name] := {symbol: symbol, ambiguous: ambiguous}
     }
     return m
 }
@@ -83,9 +86,9 @@ Entries := []   ; {keys, name, symbol, len}  긴 키열부터
 BuildTable() {
     global Entries := []
     bad := ""
-    for name, symbol in LoadSymbols() {
+    for name, def in LoadSymbols() {
         try {
-            e := {keys: HangulToKeys(name), name: name, symbol: symbol, len: StrLen(name)}
+            e := {keys: HangulToKeys(name), name: name, symbol: def.symbol, len: StrLen(name), ambiguous: def.ambiguous}
             ; 긴 키열이 먼저 오도록 삽입
             i := 1
             while (i <= Entries.Length && StrLen(Entries[i].keys) >= StrLen(e.keys))
@@ -103,13 +106,15 @@ Buf := ""
 LastHwnd := 0
 LastMatch := ""
 Enabled := true
+UndoAvail := false   ; 직전 변환을 백스페이스로 되돌릴 수 있는 상태
+LastUndo := ""       ; {n: 지울 글자 수, text: 되살릴 원문}
 
 ResetBuf(*) {
-    global Buf := ""
+    global Buf := "", UndoAvail := false
 }
 
 OnCharTyped(ih, ch) {
-    global Buf, LastHwnd
+    global Buf, LastHwnd, UndoAvail := false
     hwnd := WinExist("A")
     if (hwnd != LastHwnd) {
         Buf := ""
@@ -121,7 +126,7 @@ OnCharTyped(ih, ch) {
 }
 
 OnKeyTyped(ih, vk, sc) {
-    global Buf
+    global Buf, UndoAvail := false
     if (vk = 0x08)              ; Backspace: 조합 중엔 자모 하나 = 키 하나
         Buf := SubStr(Buf, 1, -1)
     else                        ; 방향키 등 커서 이동
@@ -157,10 +162,12 @@ IsHangulMode() {
 }
 
 ; ---------------- 일치 판정 / 치환 ----------------
-CanReplace(*) {
+; hk: 눌린 끝키의 핫키 이름("$Space" 등). HotIf 콜백으로 호출된다.
+CanReplace(hk := "") {
     global LastMatch := ""
     if (!Enabled || Buf = "")
         return false
+    endText := EndKeys.Has(SubStr(hk, 2)) ? EndKeys[SubStr(hk, 2)] : ""
     bufLen := StrLen(Buf)
     for e in Entries {
         L := StrLen(e.keys)
@@ -168,6 +175,8 @@ CanReplace(*) {
             continue
         prev := bufLen > L ? SubStr(Buf, -(L + 1), 1) : ""
         if (prev != "" && IsAlpha(prev))     ; "뮤지컬"처럼 다른 글자에 붙어 있으면 제외 (숫자는 허용: 2뮤 → 2μ)
+            continue
+        if (e.ambiguous && !IsMathContext(bufLen - L, endText))   ; "각 항목"은 두고 "2각", "각)"만 변환
             continue
         if (CheckImeMode && !IsHangulMode())
             return false
@@ -177,8 +186,20 @@ CanReplace(*) {
     return false
 }
 
+; 이름 앞(공백 건너뜀)이 숫자·연산자·여는 괄호이거나, 끝키가 수식 기호이면 수식 문맥으로 본다
+IsMathContext(prefixLen, endText) {
+    static before := "0123456789+-*/=^_(<[{|"
+    static after := ")*+=/^-]"
+    if (endText != "" && InStr(after, endText))
+        return true
+    i := prefixLen
+    while (i >= 1 && SubStr(Buf, i, 1) = " ")
+        i--
+    return i >= 1 && InStr(before, SubStr(Buf, i, 1))
+}
+
 DoReplace(endText) {
-    global Buf := ""
+    global Buf := "", UndoAvail, LastUndo
     e := LastMatch
     Send "{Space}"                 ; 조합 중인 한글을 확정 (스페이스 하나가 같이 들어감)
     Sleep CommitDelay
@@ -190,6 +211,16 @@ DoReplace(endText) {
         case "`t": Send "{Tab}"
         default:   SendText endText
     }
+    ; 엔터(전송)·탭(포커스 이동) 뒤에는 되돌릴 수 없다
+    UndoAvail := endText != "`n" && endText != "`t"
+    LastUndo := {n: StrLen(e.symbol) + 1, text: e.name endText}
+}
+
+; 변환 직후 백스페이스: 기호와 끝문자를 지우고 원래 친 한글을 되살린다
+DoUndo(*) {
+    global UndoAvail := false, Buf := ""
+    Send "{BS " LastUndo.n "}"
+    SendText LastUndo.text
 }
 
 MakeHandler(text) => (*) => DoReplace(text)
@@ -220,7 +251,7 @@ ToggleStartup(*) {
 ShowTable(*) {
     txt := ""
     for e in Entries
-        txt .= e.name " → " e.symbol "`n"
+        txt .= e.name " → " e.symbol (e.ambiguous ? "   (수식 문맥에서만)" : "") "`n"
     MsgBox(txt, "SymbolKey 변환표 (" Entries.Length "개)")
 }
 
@@ -250,6 +281,8 @@ StartInputHook()
 HotIf CanReplace
 for key, text in EndKeys
     Hotkey("$" key, MakeHandler(text))
+HotIf (*) => UndoAvail
+Hotkey("$BackSpace", DoUndo)
 HotIf
 
 Hotkey(ToggleHotkey, ToggleEnabled)
