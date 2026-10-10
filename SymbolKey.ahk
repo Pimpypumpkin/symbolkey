@@ -231,20 +231,18 @@ ConvertBeforeDigit(m, ch) {
     Send "{BS " (e.len + StrLen(m.gap) + 1) "}"
     SendText e.symbol m.gap ch
     Buf := m.gap ch
-    LastUndo := {n: StrLen(e.symbol) + StrLen(m.gap) + 1, text: e.name m.gap ch}
-    UndoAvail := true
+    UndoAvail := false                                  ; 소급 변환은 되돌리기 대상이 아님: 백스페이스는 숫자만 지운다
 }
 
 DoReplace(endText) {
     global Buf, UndoAvail, LastUndo
     e := LastMatch
-    n := e.len + 1, sym := e.symbol, orig := e.name
+    n := e.len + 1, sym := e.symbol
     ; "각 파이"처럼 바로 앞에 '모호한 이름 + 공백'이 있으면 그것도 함께 기호로 (각 → ∠)
     pre := FindAmbiguousBefore(SubStr(Buf, 1, StrLen(Buf) - StrLen(e.keys)))
     if (pre && pre.gap = " ") {
         n += pre.e.len + 1
         sym := pre.e.symbol " " sym
-        orig := pre.e.name " " orig
     }
     Buf := ""
     Send "{Space}"                 ; 조합 중인 한글을 확정 (스페이스 하나가 같이 들어감)
@@ -257,9 +255,9 @@ DoReplace(endText) {
         case "`t": Send "{Tab}"
         default:   SendText endText
     }
-    ; 엔터(전송)·탭(포커스 이동) 뒤에는 되돌릴 수 없다
+    ; 엔터(전송)·탭(포커스 이동) 뒤에는 되돌릴 수 없다. 되돌리기는 마지막 이름 하나만 (소급된 앞 기호는 유지)
     UndoAvail := endText != "`n" && endText != "`t"
-    LastUndo := {n: StrLen(sym) + 1, text: orig endText}
+    LastUndo := {n: StrLen(e.symbol) + 1, text: e.name endText}
 }
 
 ; 변환 직후 백스페이스: 기호와 끝문자를 지우고 원래 친 한글을 되살린다
