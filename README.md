@@ -11,18 +11,14 @@ ChatGPT·Claude 같은 채팅창에서 전자공학 수식을 칠 때 쓰려고 
 대델타 ␣  →  Δ
 ```
 
-## 설치
+## 설치 (설치 프로그램 없음)
 
-1. AutoHotkey v2 설치 (무료)
-   ```powershell
-   winget install -e --id AutoHotkey.AutoHotkey
-   ```
-2. `SymbolKey.ahk` 더블클릭 → 트레이에 아이콘이 뜨면 동작 중.
-3. (선택) 로그인 시 자동 실행
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install-startup.ps1          # 등록
-   powershell -ExecutionPolicy Bypass -File install-startup.ps1 -Remove  # 해제
-   ```
+1. [Releases](../../releases)에서 `SymbolKey.exe`를 받아 아무 폴더에 둔다. (AutoHotkey 설치 불필요)
+2. 더블클릭. 트레이에 아이콘이 뜨면 동작 중.
+   - 처음 실행 시 Windows SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 있다 → **추가 정보 → 실행**.
+3. (선택) 트레이 아이콘 우클릭 → **로그인 시 자동 실행** 체크.
+
+첫 실행 때 exe 옆에 `symbols.txt`(변환표)가 생긴다.
 
 ## 사용법
 
@@ -33,7 +29,7 @@ ChatGPT·Claude 같은 채팅창에서 전자공학 수식을 칠 때 쓰려고 
 
 ## 기호 추가
 
-`symbols.ahk`를 열어 `"이름", "기호",` 한 줄을 추가하고 트레이 메뉴 **다시 불러오기**.
+트레이 메뉴 **변환표 편집** → `symbols.txt`에 `이름=기호` 한 줄 추가 → 트레이 메뉴 **다시 불러오기**.
 이름은 완성형 한글 음절만 쓸 수 있다. 전체 목록은 트레이 메뉴 **변환표 보기**.
 
 | 분류 | 이름 → 기호 |
@@ -42,12 +38,22 @@ ChatGPT·Claude 같은 채팅창에서 전자공학 수식을 칠 때 쓰려고 
 | 그리스 대문자 | 대감마 Γ · 대델타 Δ · 대세타 Θ · 대람다 Λ · 대파이 Π · 대시그마 Σ · 대피 Φ · 대프사이 Ψ · 대오메가/옴 Ω |
 | 수학 | 루트 √ · 무한 ∞ · 적분 ∫ · 편미분/라운드 ∂ · 나블라/델 ∇ · 플마 ± · 곱하기 × · 나누기 ÷ · 근사 ≈ · 안같 ≠ · 작같 ≤ · 크같 ≥ · 비례 ∝ · 각 ∠ · 각도 ° · 제곱 ² · 세제곱 ³ · 화살표 → · 동치 ⇔ |
 
+## 소스로 실행 / 빌드
+
+```powershell
+winget install -e --id AutoHotkey.AutoHotkey   # AutoHotkey v2
+# 실행: SymbolKey.ahk 더블클릭
+# 빌드: Ahk2Exe 설치 후
+powershell -ExecutionPolicy Bypass -File build.ps1   # → dist\SymbolKey.exe
+```
+
 ## 동작 원리와 한계
 
-한글 IME로 "뮤"를 치면 실제 키 입력은 `a` `b`다. 스크립트는 눌린 키를 기록해 두었다가 스페이스 등을 누르는 순간
+한글 IME로 "뮤"를 치면 실제 키 입력은 `a` `b`다. 프로그램은 눌린 키를 기록해 두었다가 스페이스 등을 누르는 순간
 직전 키열이 변환표의 이름과 맞으면 (1) 스페이스를 보내 조합 중인 글자를 확정하고 (2) 음절 수만큼 지운 뒤 (3) 기호를 넣는다.
 
 - **두벌식 자판 전용.** 세벌식은 지원하지 않는다.
-- 관리자 권한으로 실행된 앱(일부 게임, 관리자 터미널)에서는 스크립트도 관리자로 실행해야 동작한다.
+- 관리자 권한으로 실행된 앱(일부 게임, 관리자 터미널)에서는 SymbolKey도 관리자로 실행해야 동작한다.
 - 일부 앱(특히 UWP)은 한/영 상태를 알려주지 않아 변환이 안 될 수 있다. 그럴 땐 트레이 메뉴 **한글 모드일 때만 변환**을 끄면 된다 (대신 영문 모드에서 `ab `를 치면 μ로 바뀜).
 - 글자가 덜 지워지거나 하나 더 지워지면 `SymbolKey.ahk` 상단의 `CommitDelay` 값을 올려 본다.
+- exe를 다른 폴더로 옮기면 "로그인 시 자동 실행"을 한 번 껐다 켜야 한다.

@@ -1,6 +1,10 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 #Warn
+;@Ahk2Exe-SetName SymbolKey
+;@Ahk2Exe-SetDescription Korean name to math symbol converter
+;@Ahk2Exe-SetVersion 0.2.0
+;@Ahk2Exe-SetCopyright Pimpypumpkin
 ; ============================================================
 ;  SymbolKey - 한글 이름을 수학/그리스 기호로 바꿔 주는 전역 입력기
 ;
@@ -30,7 +34,31 @@ EndKeys := Map(
     "NumpadAdd", "+",  "NumpadSub", "-",  "NumpadMult", "*",  "NumpadDiv", "/",
 )
 
-#Include symbols.ahk   ; Symbols := Map("뮤", "μ", ...)
+SymbolsFile := A_ScriptDir "\symbols.txt"   ; 변환표: "이름=기호" 한 줄씩
+StartupLnk  := A_Startup "\SymbolKey.lnk"
+
+; ---------------- 변환표 파일 읽기 ----------------
+LoadSymbols() {
+    if A_IsCompiled
+        FileInstall "symbols.txt", SymbolsFile, 0   ; exe에 내장된 기본 변환표를 파일이 없을 때만 꺼냄
+    if !FileExist(SymbolsFile) {
+        MsgBox("변환표 파일이 없습니다:`n" SymbolsFile, "SymbolKey", "Iconx")
+        ExitApp
+    }
+    m := Map()
+    for line in StrSplit(FileRead(SymbolsFile, "UTF-8"), "`n", "`r") {
+        line := Trim(line)
+        if (line = "" || SubStr(line, 1, 1) = ";" || SubStr(line, 1, 1) = "#")
+            continue
+        pos := InStr(line, "=")
+        if !pos
+            continue
+        name := Trim(SubStr(line, 1, pos - 1)), symbol := Trim(SubStr(line, pos + 1))
+        if (name != "" && symbol != "")
+            m[name] := symbol
+    }
+    return m
+}
 
 ; ---------------- 두벌식 자판: 자모 → 키 ----------------
 CHO  := ["r","R","s","e","E","f","a","q","Q","t","T","d","w","W","c","z","x","v","g"]
@@ -55,7 +83,7 @@ Entries := []   ; {keys, name, symbol, len}  긴 키열부터
 BuildTable() {
     global Entries := []
     bad := ""
-    for name, symbol in Symbols {
+    for name, symbol in LoadSymbols() {
         try {
             e := {keys: HangulToKeys(name), name: name, symbol: symbol, len: StrLen(name)}
             ; 긴 키열이 먼저 오도록 삽입
@@ -67,7 +95,7 @@ BuildTable() {
             bad .= "  " name " : " err.Message "`n"
     }
     if bad
-        MsgBox("symbols.ahk에서 건너뛴 항목:`n" bad, "SymbolKey", "Icon!")
+        MsgBox("symbols.txt에서 건너뛴 항목:`n" bad, "SymbolKey", "Icon!")
 }
 
 ; ---------------- 최근 입력 기록 ----------------
@@ -178,6 +206,17 @@ ToggleImeCheck(*) {
     A_TrayMenu.ToggleCheck("한글 모드일 때만 변환")
 }
 
+IsStartupEnabled() => FileExist(StartupLnk) != ""
+
+ToggleStartup(*) {
+    if IsStartupEnabled()
+        FileDelete StartupLnk
+    else
+        FileCreateShortcut A_ScriptFullPath, StartupLnk, A_ScriptDir, , "SymbolKey"
+    A_TrayMenu.ToggleCheck("로그인 시 자동 실행")
+    TrayTip(IsStartupEnabled() ? "로그인할 때 자동으로 시작됩니다" : "자동 실행을 해제했습니다", "SymbolKey")
+}
+
 ShowTable(*) {
     txt := ""
     for e in Entries
@@ -190,15 +229,18 @@ SetupTray() {
     A_TrayMenu.Delete()
     A_TrayMenu.Add("켜기 / 끄기`t" ToggleHotkey, ToggleEnabled)
     A_TrayMenu.Add("한글 모드일 때만 변환", ToggleImeCheck)
+    A_TrayMenu.Add("로그인 시 자동 실행", ToggleStartup)
     A_TrayMenu.Add()
     A_TrayMenu.Add("변환표 보기", ShowTable)
-    A_TrayMenu.Add("변환표 편집 (symbols.ahk)", (*) => Run('notepad.exe "' A_ScriptDir '\symbols.ahk"'))
+    A_TrayMenu.Add("변환표 편집 (symbols.txt)", (*) => Run('notepad.exe "' SymbolsFile '"'))
     A_TrayMenu.Add("다시 불러오기", (*) => Reload())
     A_TrayMenu.Add()
     A_TrayMenu.Add("종료", (*) => ExitApp())
     A_TrayMenu.Check("켜기 / 끄기`t" ToggleHotkey)
     if CheckImeMode
         A_TrayMenu.Check("한글 모드일 때만 변환")
+    if IsStartupEnabled()
+        A_TrayMenu.Check("로그인 시 자동 실행")
 }
 
 ; ---------------- 시작 ----------------
