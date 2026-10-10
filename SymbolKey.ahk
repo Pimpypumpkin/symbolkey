@@ -3,7 +3,7 @@
 #Warn
 ;@Ahk2Exe-SetName SymbolKey
 ;@Ahk2Exe-SetDescription Korean name to math symbol converter
-;@Ahk2Exe-SetVersion 0.3.0
+;@Ahk2Exe-SetVersion 0.3.1
 ;@Ahk2Exe-SetCopyright Pimpypumpkin
 ; ============================================================
 ;  SymbolKey - 한글 이름을 수학/그리스 기호로 바꿔 주는 전역 입력기
@@ -120,6 +120,11 @@ OnCharTyped(ih, ch) {
         Buf := ""
         LastHwnd := hwnd
     }
+    ; "각3", "각 30"처럼 모호한 이름 뒤에 숫자가 오면 각도로 보고 소급 변환
+    if (Enabled && IsDigit(ch) && (m := FindAmbiguousBefore(Buf)) && (!CheckImeMode || IsHangulMode())) {
+        ConvertBeforeDigit(m, ch)
+        return
+    }
     Buf .= ch
     if (StrLen(Buf) > BufferLimit)
         Buf := SubStr(Buf, -BufferLimit)
@@ -198,13 +203,53 @@ IsMathContext(prefixLen, endText) {
     return i >= 1 && InStr(before, SubStr(Buf, i, 1))
 }
 
+; s가 "모호한 이름(+ 공백 하나)"으로 끝나면 {e, gap}을, 아니면 ""을 돌려준다
+FindAmbiguousBefore(s) {
+    gap := SubStr(s, -1) = " " ? " " : ""
+    body := gap != "" ? SubStr(s, 1, -1) : s
+    bodyLen := StrLen(body)
+    for e in Entries {
+        if !e.ambiguous
+            continue
+        L := StrLen(e.keys)
+        if (bodyLen < L || SubStr(body, -L) !== e.keys)
+            continue
+        prev := bodyLen > L ? SubStr(body, -(L + 1), 1) : ""
+        if (prev != "" && IsAlpha(prev))
+            continue
+        return {e: e, gap: gap}
+    }
+    return ""
+}
+
+; 숫자 ch가 막 입력된 시점: 앞의 "각(+공백)"을 지우고 "∠(+공백)숫자"로 바꾼다
+ConvertBeforeDigit(m, ch) {
+    global Buf, UndoAvail, LastUndo
+    e := m.e
+    Sleep CommitDelay                                   ; 숫자 입력으로 조합이 확정될 시간
+    Send "{BS " (e.len + StrLen(m.gap) + 1) "}"
+    SendText e.symbol m.gap ch
+    Buf := m.gap ch
+    LastUndo := {n: StrLen(e.symbol) + StrLen(m.gap) + 1, text: e.name m.gap ch}
+    UndoAvail := true
+}
+
 DoReplace(endText) {
-    global Buf := "", UndoAvail, LastUndo
+    global Buf, UndoAvail, LastUndo
     e := LastMatch
+    n := e.len + 1, sym := e.symbol, orig := e.name
+    ; "각 파이"처럼 바로 앞에 '모호한 이름 + 공백'이 있으면 그것도 함께 기호로 (각 → ∠)
+    pre := FindAmbiguousBefore(SubStr(Buf, 1, StrLen(Buf) - StrLen(e.keys)))
+    if (pre && pre.gap = " ") {
+        n += pre.e.len + 1
+        sym := pre.e.symbol " " sym
+        orig := pre.e.name " " orig
+    }
+    Buf := ""
     Send "{Space}"                 ; 조합 중인 한글을 확정 (스페이스 하나가 같이 들어감)
     Sleep CommitDelay
-    Send "{BS " (e.len + 1) "}"    ; 스페이스 + 한글 음절 수만큼 지우기
-    SendText e.symbol
+    Send "{BS " n "}"              ; 스페이스 + 한글 음절 수만큼 지우기
+    SendText sym
     switch endText {
         case " ":  Send "{Space}"
         case "`n": Send "{Enter}"
@@ -213,7 +258,7 @@ DoReplace(endText) {
     }
     ; 엔터(전송)·탭(포커스 이동) 뒤에는 되돌릴 수 없다
     UndoAvail := endText != "`n" && endText != "`t"
-    LastUndo := {n: StrLen(e.symbol) + 1, text: e.name endText}
+    LastUndo := {n: StrLen(sym) + 1, text: orig endText}
 }
 
 ; 변환 직후 백스페이스: 기호와 끝문자를 지우고 원래 친 한글을 되살린다
